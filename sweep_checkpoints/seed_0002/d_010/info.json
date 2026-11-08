@@ -1,0 +1,20 @@
+{
+  "seed": 2,
+  "dimension": 10,
+  "train_seconds": 193.67571847094223,
+  "config": {
+    "K": 100.0,
+    "T": 1.0,
+    "r": 0.05,
+    "sigma": 0.2,
+    "rho": 0.3,
+    "N": 30,
+    "num_epochs": 3000,
+    "batch_size": 1024,
+    "learning_rate": 1.0,
+    "num_units": 10,
+    "num_hidden_layers": 3,
+    "X0_low": 80.0,
+    "X0_high": 120.0
+  }
+}

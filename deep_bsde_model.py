@@ -110,6 +110,18 @@ class DeepBSDE(tf.keras.Model):
             initial_learning_rate=learning_rate, decay_steps=num_epochs,
         )
         optimizer = tf.keras.optimizers.Adam(lr_schedule) if optimizer is None else optimizer(lr_schedule)
+        
+        # Initialize network layers in eager mode
+        dummy_dW = tf.zeros(
+            (batch_size, self.N, self.d),
+            dtype=tf.float32
+        )
+
+        _ = self(dummy_dW, training=False)
+
+        # Check BatchNormalization initialization
+        bn = self.y0_net.bn_layers[0]
+        print("Built:", bn.built)
 
         for epoch in range(num_epochs):
             dW = brownian_increment(batch_size, self.N, self.d, self.T, corr=self.rho)
@@ -132,68 +144,3 @@ class DeepBSDE(tf.keras.Model):
                 x = x[None, :]      
         return self.y0_net(x, training=False)[:, 0]
              
-def nd_grid_price(d, S0, K, T, r, sigma, corr, M=25, N_time=200, S_max_mult=3.0):
-    """
-    Naive dense tensor-grid explicit finite-difference solver for the
-    d-dimensional Black-Scholes basket call PDE. Demonstrates cost growth,
-    not meant to be a production-grade solver.
-
-    Returns (price, elapsed_seconds, grid_points, peak_memory_bytes)
-    """
-
-    t0 = time.time()
-    sigma = np.atleast_1d(np.asarray(sigma, dtype=np.float64))
-    if sigma.size == 1 and d > 1:
-        sigma = np.full(d, sigma.item())
-    if corr is None:
-        corr = np.eye(d)
-    corr = np.asarray(corr, dtype=np.float64)
-
-    S_max = S_max_mult * max(np.max(S0), K)
-    h = S_max / M
-    axes = [np.linspace(0, S_max, M + 1) for _ in range(d)]
-    mesh = np.meshgrid(*axes, indexing='ij')  # each shape (M+1,)*d
-
-    basket = sum(mesh) / d  # equal-weight basket
-    V = np.maximum(basket - K, 0.0).astype(np.float64)
-
-    dt = T / N_time
-    sigma = np.asarray(sigma, dtype=np.float64)
-    corr = np.asarray(corr, dtype=np.float64)
-
-    grid_points = V.size
-    mem_bytes = V.nbytes
-
-    for step in range(N_time):
-        L = np.zeros_like(V)
-        for i in range(d):
-            dV = (np.roll(V, -1, axis=i) - np.roll(V, 1, axis=i)) / (2 * h)
-            L += r * mesh[i] * dV
-            for j in range(d):
-                d2V = (np.roll(np.roll(V, -1, axis=i), -1, axis=j)
-                       - np.roll(np.roll(V, -1, axis=i), 1, axis=j)
-                       - np.roll(np.roll(V, 1, axis=i), -1, axis=j)
-                       + np.roll(np.roll(V, 1, axis=i), 1, axis=j)) / (4 * h * h)
-                L += 0.5 * sigma[i] * sigma[j] * corr[i, j] * mesh[i] * mesh[j] * d2V
-        L -= r * V
-        V = V + dt * L
-
-        # reset boundary (Dirichlet): F=0 at all-zero face, linear payoff at S_max face
-        slicer_lo = [slice(None)] * d
-        slicer_hi = [slice(None)] * d
-        for i in range(d):
-            slicer_lo[i] = 0
-            V[tuple(slicer_lo)] = 0.0
-            slicer_lo[i] = slice(None)
-            slicer_hi[i] = M
-            V[tuple(slicer_hi)] = np.maximum(sum(mesh)[tuple(slicer_hi)] / d
-                                              - K * np.exp(-r * (step + 1) * dt), 0.0)
-            slicer_hi[i] = slice(None)
-
-    # interpolate at S0 (nearest-grid-point, simple for demo purposes)
-    idx = tuple(int(round(s / h)) for s in S0)
-    idx = tuple(min(max(i, 0), M) for i in idx)
-    price = V[idx]
-
-    elapsed = time.time() - t0
-    return price, elapsed, grid_points, mem_bytes
